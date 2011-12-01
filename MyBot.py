@@ -27,10 +27,12 @@ class MyBot:
         self.ordered = set([])
         self.paths = []
         self.reachable = set(ants.my_hills())
-        
+        self.weights = {}
+
         self.border = []
         self.crosses = []
 
+ 
         for row in range(ants.rows):
             for col in range(ants.cols):
                 self.unseen.append((row, col))        
@@ -42,9 +44,10 @@ class MyBot:
             self.roles['peasants'].append(path)
         
 
-    def do_move_location(self, ants, start, end):
-        if ants.time_remaining() < 0.25 * ants.turntime:
-            return False
+    def do_move_location(self, ants, start, end, weight):
+        time1 = ants.time_remaining()
+        if ants.time_remaining() < 0.5 * ants.turntime:
+            return []
 
         parents = {}
         costs = {}
@@ -70,7 +73,7 @@ class MyBot:
                 else:
                     for direction in directions:
                         new_n = ants.destination(n, direction)   
-                        self.__addtoopenlist__(n, new_n, 1, end, parents, openlist, closedlist, costs, ants)
+                        self.__addtoopenlist__(n, new_n, 1, end, parents, openlist, closedlist, costs, ants, weight)
 
             if (not n) or success:
                 complete = True
@@ -84,16 +87,23 @@ class MyBot:
             returnpath.append(start)
             returnpath.reverse()    
     
+            time2 = ants.time_remaining()
+            self.time += time1 - time2
             return returnpath
+
+        time2 = ants.time_remaining()
+        self.time += time1 - time2
 
         return []
                     
 
 
-    def __addtoopenlist__(self, nodefrom, nodeto, additionalcost, end, parents, openlist, closedlist, costs, ants):
-        
-  
+    def __addtoopenlist__(self, nodefrom, nodeto, additionalcost, end, parents, openlist, closedlist, costs, ants, weight):
+
         if nodeto not in self.reachable:
+            return       
+  
+        if self.weights[nodeto] < weight:
             return
 
         if (not ants.passable(nodeto)) or nodeto in closedlist:
@@ -120,7 +130,7 @@ class MyBot:
 
     def do_move_direction(self, ants, loc, direction):
         new_loc = ants.destination(loc, direction)
-        if (ants.unoccupied(new_loc) and new_loc not in self.orders):
+        if (new_loc not in self.orders):
             ants.issue_order((loc, direction))
             self.orders[new_loc] = loc
             self.ordered.add(loc)
@@ -129,14 +139,58 @@ class MyBot:
                 if loc in role:
                     role.remove(loc)
                     role.add(new_loc)
-
+            
             return True
         else:
             return False
 
     def make_moves(self, ants):
         mademoves = set([])
+
+        outgoing = {}
+        incoming = {}
+
+        L = deque([])
+        sorted = []
+        cycles = []
+        
         for path in self.paths:
+            if len(path) > 1:
+                outgoing[path[0]] = path[1]
+                incoming[path[1]] = path
+        
+        for path in self.paths:
+            if len(path) > 1:
+                if path[1] in outgoing and outgoing[path[1]] == path[0]:
+                    cycles.append(path)
+    
+        
+        for path in self.paths:
+            if len(path) > 1:
+                if path[1] not in outgoing:
+                    L.append(path)
+        while len(L):
+            path = L.popleft()
+            sorted.append(path)
+            if path[0] in incoming:
+                L.append(incoming[path[0]])
+            
+
+        for path in sorted:
+            dir = ants.direction(path[0], path[1])[0]
+            if self.do_move_direction(ants, path[0], dir):
+                self.move_ant(path, mademoves)
+        
+        for path in cycles:
+            if len(path) > 1:
+                for p in cycles:
+                    if len(p) > 1:
+                        if p != path and p[0] == path[1] and p[1] == path[0]:
+                            self.move_ant(path, mademoves)
+                            self.move_ant(p, mademoves)
+                            break
+        return
+        for path in sorted:
             if path[0] not in mademoves:
                 if len(path) > 1:                    
                     dir = ants.direction(path[0], path[1])[0]
@@ -144,12 +198,17 @@ class MyBot:
                         self.move_ant(path, mademoves)
                     else:
                         for p in self.paths:
-                            if p != path and p[0] == path[1] and p[0] not in mademoves:
+                            if p != path and p[0] == path[1] and p[0] not in mademoves:                                    
                                 if len(p) > 1:
                                     if p[1] == path[0]:                                        
                                         self.move_ant(path, mademoves)
                                         self.move_ant(p, mademoves)                                        
                                         break
+ #                                   elif path[0] in self.roles['knights'] and p[0] not in self.roles['knights']:
+ #                                       self.switch_roles(path[0], p[0])
+ #                                       self.shift_move(p, path[0])
+ #                                       self.move_ant(path, mademoves)
+ #                                       break
                                 elif path[-1] != p[0]:            
                                     self.switch_roles(path[0], p[0])
                                     self.shift_move(p, path[0])
@@ -184,6 +243,8 @@ class MyBot:
         if len(self.border) == 0:            
             self.border = list(ants.my_hills())
             self.reachable = set(ants.my_hills())
+            for hill_loc in ants.my_hills():
+                self.weights[hill_loc] = 3
 
 
         changed = True
@@ -198,20 +259,31 @@ class MyBot:
                     n = ants.destination(loc, dir)
                     if n not in self.seen:
                         not_seen_neighbour = True
-                    elif n not in self.reachable and ants.passable(n):
-                        changed = True
-                        self.reachable.add(n)
-                        open_list.append(n)
+                    elif n not in self.reachable:
+                        if ants.passable(n):
+                            changed = True
+                            self.reachable.add(n)
+                            open_list.append(n)
+                            if n not in self.weights:
+                                self.weights[n] = 3
+                        else:
+                            self.weights[n] = 0
+                            for d in ['n', 'e', 's', 'w']:
+                                self.weights[ants.destination(n, d)] = 1
+                                        
+                                
+                                
                 if not_seen_neighbour:
                     open_list.append(loc)
             if changed:
                 self.border = list(open_list)
-                i += 1
+  
 
-        if i > 0:
-            random.shuffle(self.border)
+      
+            
 
     def find_cross(self, ants, pos):
+        return [(52, 32), (51,33), (52, 33), (53, 33), (52, 34)]
         standing_ants = set([])
         for path in self.paths:
             if len(path) == 1:
@@ -220,7 +292,6 @@ class MyBot:
         directions = ['n', 'w', 's', 'e']
         marked = set([])
         openlist = deque(ants.my_hills())
-        i = 0
         while len(openlist):
             loc = openlist.popleft()
             marked.add(loc)
@@ -231,7 +302,6 @@ class MyBot:
                 if n_loc in self.reachable and n_loc not in marked:
                     openlist.append(n_loc)
             ok = True
-            i += 1
             for node in cross:
                 if node not in self.reachable or node in ants.my_hills() or node in standing_ants:
                     ok = False
@@ -255,12 +325,16 @@ class MyBot:
             if p[0] == path[0]:
                 self.paths.remove(p)
                 break
-        self.paths.append(path)
+        if path[0] in self.roles['knights']:            
+            self.paths.insert(0, path)
+        else:
+            self.paths.append(path)
 
     # do turn is run once per turn
     # the ants class has the game state and is updated by the Ants.run method
     # it also has several helper methods to use
     def do_turn(self, ants):
+        self.time = 0
         self.my_ants = set(ants.my_ants())
         
         self.orders = {}
@@ -304,14 +378,14 @@ class MyBot:
 
             if not have_role:
 #                if (len(self.roles['peasants']) < 4 or len(self.roles['peasants']) < 0.5 * len(self.my_ants)):
-                if len(self.my_ants) % 5 != 0:                    
-                    self.roles['peasants'].add(ant_loc)                
-                else:
-                    self.roles['knights'].add(ant_loc)
-                    if len(self.roles['knights']) % 5 == 1:
-                        cross = self.find_cross(ants, ants.my_hills()[0])
-                        print "cross: " + str(cross)
-                        self.crosses.append(cross)
+#                if len(self.my_ants) % 3 != 0:                    
+                self.roles['peasants'].add(ant_loc)                
+#                else:
+#                    self.roles['knights'].add(ant_loc)
+#                    if len(self.roles['knights']) % 5 == 1:
+#                        cross = self.find_cross(ants, ants.my_hills()[0])
+#                        print "cross: " + str(cross)
+#                        self.crosses.append(cross)
                     
                     
                         
@@ -319,13 +393,35 @@ class MyBot:
             if ant_loc not in busy_ants and ant_loc not in waiting_ants:
                 reminder = len(self.roles['knights']) % 5
                 cross = self.crosses[-1]
-                path = self.do_move_location(ants, ant_loc, cross[reminder])
+                path = self.do_move_location(ants, ant_loc, cross[reminder], 1)
                 if len(path) > 0:
                     self.append_path(path)
                     busy_ants.add(ant_loc)
                     tar.add(cross[reminder])
                     
-                        
+        if len(self.crosses):
+            cross = self.crosses[-1]
+            ready = True
+            for loc in cross:
+                if loc not in self.roles['knights']:
+                    ready = False
+            if ready:
+                loc = random.choice(self.border)
+                path = self.do_move_location(ants, cross[2], loc, 3)
+                if len(path) > 0:
+#                    self.append_path(path)
+                    for dir in ['w', 'n', 'c', 's', 'e']:
+                        if dir == 'c':
+                            self.append_path(path)
+                        else:
+                            new_path = []
+                            for n in path:
+                                new_path.append(ants.destination(n, dir))
+                            self.append_path(new_path)
+
+                    self.crosses.pop()
+            
+
 
         for ant_loc in self.roles['peasants']:
             if ant_loc not in busy_ants:
@@ -336,7 +432,7 @@ class MyBot:
                         foods.append((dist, food_loc))
                 foods.sort()
                 for dist, food_loc in foods:
-                    path = self.do_move_location(ants, ant_loc, food_loc)
+                    path = self.do_move_location(ants, ant_loc, food_loc, 1)
                     if len(path) > 0:
                         self.append_path(path)
                         busy_ants.add(ant_loc)
@@ -344,12 +440,12 @@ class MyBot:
                         break
   
  
-
+        random.shuffle(self.border)
         for ant_loc in self.roles['peasants']:            
             if ant_loc not in busy_ants:
                 for unseen_loc in self.border:
                     if unseen_loc not in tar:
-                        path = self.do_move_location(ants, ant_loc, unseen_loc)
+                        path = self.do_move_location(ants, ant_loc, unseen_loc, 1)
                         if len(path) > 0:
                             self.append_path(path)
                             busy_ants.add(ant_loc)
@@ -358,7 +454,7 @@ class MyBot:
 
         self.make_moves(ants)
 
-        
+
     
 if __name__ == '__main__':
     # psyco will speed up python a little, but is not needed
