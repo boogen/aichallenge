@@ -45,7 +45,6 @@ class MyBot:
         
 
     def do_move_location(self, ants, start, end, weight):
-        time1 = ants.time_remaining()
         if ants.time_remaining() < 0.5 * ants.turntime:
             return []
 
@@ -87,12 +86,8 @@ class MyBot:
             returnpath.append(start)
             returnpath.reverse()    
     
-            time2 = ants.time_remaining()
-            self.time += time1 - time2
             return returnpath
 
-        time2 = ants.time_remaining()
-        self.time += time1 - time2
 
         return []
                     
@@ -157,7 +152,9 @@ class MyBot:
         for path in self.paths:
             if len(path) > 1:
                 outgoing[path[0]] = path[1]
-                incoming[path[1]] = path
+                if path[1] not in incoming:
+                    incoming[path[1]] = []
+                incoming[path[1]].append(path)
         
         for path in self.paths:
             if len(path) > 1:
@@ -169,53 +166,48 @@ class MyBot:
             if len(path) > 1:
                 if path[1] not in outgoing:
                     L.append(path)
+        marked = set([])
         while len(L):
             path = L.popleft()
-            sorted.append(path)
-            if path[0] in incoming:
-                L.append(incoming[path[0]])
-            
+            if path[0] not in marked:
+                marked.add(path[0])
+                sorted.append(path)
+                if path[0] in incoming:
+                    for p in incoming[path[0]]:
+                        if p != path:
+                            L.append(p)
+ 
+
+
+        for path in cycles:
+            if self.uncycle(path, incoming, mademoves):
+                break
+
 
         for path in sorted:
             dir = ants.direction(path[0], path[1])[0]
             if self.do_move_direction(ants, path[0], dir):
-                self.move_ant(path, mademoves)
+                self.move_ant(path, path[1], mademoves)
         
-        for path in cycles:
-            if len(path) > 1:
-                for p in cycles:
-                    if len(p) > 1:
-                        if p != path and p[0] == path[1] and p[1] == path[0]:
-                            self.move_ant(path, mademoves)
-                            self.move_ant(p, mademoves)
-                            break
         return
-        for path in sorted:
-            if path[0] not in mademoves:
-                if len(path) > 1:                    
-                    dir = ants.direction(path[0], path[1])[0]
-                    if self.do_move_direction(ants, path[0], dir):   
-                        self.move_ant(path, mademoves)
-                    else:
-                        for p in self.paths:
-                            if p != path and p[0] == path[1] and p[0] not in mademoves:                                    
-                                if len(p) > 1:
-                                    if p[1] == path[0]:                                        
-                                        self.move_ant(path, mademoves)
-                                        self.move_ant(p, mademoves)                                        
-                                        break
- #                                   elif path[0] in self.roles['knights'] and p[0] not in self.roles['knights']:
- #                                       self.switch_roles(path[0], p[0])
- #                                       self.shift_move(p, path[0])
- #                                       self.move_ant(path, mademoves)
- #                                       break
-                                elif path[-1] != p[0]:            
-                                    self.switch_roles(path[0], p[0])
-                                    self.shift_move(p, path[0])
-                                    self.move_ant(path, mademoves)
-                                    break
                 
-       
+    def uncycle(self, path, incoming, mademoves):
+        if len(path) > 1:
+            p = path
+            marked = []
+            good_paths = [p]
+            while p[0] in incoming and len(good_paths) > 0:                         
+                good_paths = []
+                for some_path in incoming[p[0]]:
+                    if path[0] in some_path and some_path[0] in path and some_path != path:
+                        good_paths.append(some_path)
+                if len(good_paths) > 0:                                    
+                    p = good_paths[0]
+            if len(p) > 1 and p != path:
+                self.move_ant(path, p[0], mademoves)
+                self.move_ant(p, path[0], mademoves)     
+                return True
+        
     def switch_roles(self, loc1, loc2):
         role1 = None
         role2 = None
@@ -234,8 +226,9 @@ class MyBot:
     def shift_move(self, path, loc):
         path.insert(0, loc)
 
-    def move_ant(self, path, mademoves):
-        path.pop(0)
+    def move_ant(self, path, loc,  mademoves):
+        while path[0] != loc:
+            path.pop(0)
         mademoves.add(path[0])
                                                                  
  
