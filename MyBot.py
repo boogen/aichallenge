@@ -40,7 +40,6 @@ class MyBot:
             for col in range(ants.cols):
                 self.unseen.append((row, col))        
 
-        self.crash = False
     
     def __add_path__(self, path):
         if len(self.roles['peasants']) < 50:
@@ -349,8 +348,6 @@ class MyBot:
             
 
     def find_cross(self, ants, pos):
-#        return [(75, 74), (74,75), (75, 75), (76, 75), (75, 76)]
-#        return [(58, 42), (57,43), (58, 43), (59, 43), (58, 44)]
         standing_ants = set([])
         for path in self.paths:
             if len(path) == 1:
@@ -358,7 +355,6 @@ class MyBot:
 
         directions = ['n', 'w', 's', 'e']
         marked = set([])
-#        openlist = deque([(69,41)])#deque(ants.my_hills())
         openlist = deque(ants.my_hills())
         while len(openlist):
             loc = openlist.popleft()
@@ -424,9 +420,6 @@ class MyBot:
     # the ants class has the game state and is updated by the Ants.run method
     # it also has several helper methods to use
     def do_turn(self, ants):
-        if self.crash:
-            seg = []
-            print seg[14412]
         self.time = 0
         self.my_ants = set(ants.my_ants())
         
@@ -558,9 +551,7 @@ class MyBot:
                             unit.append(new_path)
                     self.units.append(unit)
                     self.crosses.pop()
-                else:
-                    seg = []
-                    print seg[1]
+
             
             
 
@@ -595,11 +586,7 @@ class MyBot:
                             break                
 
 
-        before = len(self.roles["knights"])        
         self.make_moves(ants)
-        after = len(self.roles["knights"])
-#        if after < before:
-#            self.crash = True
 
 
     
