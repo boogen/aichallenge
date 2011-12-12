@@ -164,6 +164,10 @@ class MyBot:
                 standing[path[0]] = path
                 self.orders[path[0]] = path[0]
                 self.move_ant(path, path[0], mademoves)
+
+        if ants.time_remaining() < 50:
+            return
+   
         
         for path in self.paths:
             if len(path) > 1:
@@ -172,6 +176,10 @@ class MyBot:
                     incoming[path[1]] = []
                 incoming[path[1]].append(path)
 
+
+        if ants.time_remaining() < 50:
+            return
+   
 
         fours = []
         for path in self.paths:
@@ -185,6 +193,10 @@ class MyBot:
                 if p == path[0] and len(points) == 4:
                     fours.append(path)
                         
+
+        if ants.time_remaining() < 50:
+            return
+   
         
         for path in self.paths:
             if len(path) > 1:
@@ -196,6 +208,10 @@ class MyBot:
                         i += 1
                     cycles.append((length, path))
     
+        if ants.time_remaining() < 50:
+            return
+   
+
         cycles.sort()
         cycles.reverse()
 
@@ -204,6 +220,10 @@ class MyBot:
                 if path[1] not in outgoing:
                     L.append(path)
 
+
+        if ants.time_remaining() < 50:
+            return
+   
         marked = set([])
         while len(L):
             path = L.popleft()
@@ -215,6 +235,9 @@ class MyBot:
                         if p != path:
                             L.append(p)
  
+        if ants.time_remaining() < 50:
+            return
+   
 
             
         for l, path in cycles:
@@ -223,6 +246,9 @@ class MyBot:
             else:
                 self.move_ant(path, path[0], mademoves)
 
+        if ants.time_remaining() < 50:
+            return
+   
 
         for path in sorted:
             dir = ants.direction(path[0], path[1])[0]
@@ -241,10 +267,17 @@ class MyBot:
             else:
                 self.move_ant(path, path[0], mademoves)
                 self.orders[path[0]] = path[0]
-        
+
+        if ants.time_remaining() < 50:
+            return
+           
 
         for path in fours:
             self.move_ant(path, path[1], mademoves)
+
+        if ants.time_remaining() < 50:
+            return
+   
 
         for path in self.paths:
             if path[0] not in mademoves:
@@ -437,6 +470,8 @@ class MyBot:
                     dead_ants.add(loc)
             role -= dead_ants
                     
+        if ants.time_remaining() < 50:
+            return
 
         tar = set([])
         busy_ants = set([])
@@ -448,20 +483,31 @@ class MyBot:
             elif len(path) == 1:
                 waiting_ants.add(path[0])
 
-
+        if ants.time_remaining() < 50:
+            return
 
         for loc in self.unseen[:]:
             if ants.visible(loc):
                 self.seen.add(loc)
                 self.unseen.remove(loc)
 
+        if ants.time_remaining() < 50:
+            return
+
         self.compute_border(ants)
+
+        if ants.time_remaining() < 50:
+            return
+
 
         for hill, hill_owner in ants.enemy_hills():
             if hill not in self.enemy_hills and hill in self.reachable:
                 self.enemy_hills.append(hill)
         hills_copy = list(self.enemy_hills)
         
+        if ants.time_remaining() < 50:
+            return
+
 
         enmyhills = set([])
         for hill, hill_owner in ants.enemy_hills():
@@ -470,11 +516,19 @@ class MyBot:
             if ants.visible(hill) and  hill not in enmyhills:
                 self.enemy_hills.remove(hill)
                 
+        if ants.time_remaining() < 50:
+            return
                
                 
 
         self.scatter(ants)
+        if ants.time_remaining() < 50:
+            return
+
         self.fatality(ants)
+        if ants.time_remaining() < 50:
+            return
+
         
         knights_gathering = 0
         self.free_cross = []
@@ -485,6 +539,9 @@ class MyBot:
                     if path[-1] in self.free_cross:
                         self.free_cross.remove(path[-1])
                         knights_gathering += 1
+
+        if ants.time_remaining() < 50:
+            return
  
 
         for ant_loc in self.my_ants:
@@ -506,6 +563,9 @@ class MyBot:
                         cross = self.find_cross(ants, ants.my_hills()[0])
                         self.free_cross = list(cross)
                         self.crosses.append(cross)
+
+        if ants.time_remaining() < 50:
+            return
                     
                     
                         
@@ -513,11 +573,17 @@ class MyBot:
             if ant_loc not in busy_ants and ant_loc not in waiting_ants and len(self.crosses):
                 cross = self.crosses[0]
                 loc = self.free_cross.pop(0)
-                path = self.do_move_location(ants, ant_loc, loc , 1)                
+                path = self.do_move_location(ants, ant_loc, loc , 1)       
+                if ants.time_remaining() < 50:
+                    return
+         
                 if len(path) > 0:
                     self.append_path(path)
                     busy_ants.add(ant_loc)
                     tar.add(loc)
+
+        if ants.time_remaining() < 50:
+            return
                     
         if len(self.crosses):
             cross = self.crosses[0]
@@ -537,6 +603,9 @@ class MyBot:
                         loc = target
                         break
                 path = self.do_move_location(ants, cross[0], loc, 3)
+                if ants.time_remaining() < 50:
+                    return
+
                 unit = []
                 if len(path) > 0:
                     for dir in ['w', 'n', 'c', 's', 'e']:
@@ -553,7 +622,9 @@ class MyBot:
                     self.crosses.pop()
 
             
-            
+        if ants.time_remaining() < 50:
+            return
+               
 
 
         for ant_loc in self.roles['peasants']:
@@ -564,28 +635,45 @@ class MyBot:
                         dist = ants.distance(ant_loc, food_loc)
                         foods.append((dist, food_loc))
                 foods.sort()
+                if ants.time_remaining() < 50:
+                    return
+   
                 for dist, food_loc in foods:
                     path = self.do_move_location(ants, ant_loc, food_loc, 1)
+                    if ants.time_remaining() < 50:
+                        return
+   
                     if len(path) > 0:
                         self.append_path(path)
                         busy_ants.add(ant_loc)
                         tar.add(food_loc)
                         break
-  
+        if ants.time_remaining() < 50:
+            return
+     
  
         random.shuffle(self.border)
+
+        if ants.time_remaining() < 50:
+            return
+   
         for ant_loc in self.roles['peasants']:            
             if ant_loc not in busy_ants:
                 for unseen_loc in self.border:
                     if unseen_loc not in tar:
                         path = self.do_move_location(ants, ant_loc, unseen_loc, 1)
+                        if ants.time_remaining() < 50:
+                            return
+   
                         if len(path) > 0:
                             self.append_path(path)
                             busy_ants.add(ant_loc)
                             tar.add(unseen_loc)
                             break                
 
-
+        if ants.time_remaining() < 50:
+            return
+   
         self.make_moves(ants)
 
 
