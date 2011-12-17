@@ -155,6 +155,7 @@ class MyBot:
         incoming = {}
 
         L = deque([])
+        marked = set([])
         sorted = []
         cycles = []
         standing = {}
@@ -219,22 +220,21 @@ class MyBot:
             if len(path) > 1:
                 if path[1] not in outgoing:
                     L.append(path)
+                    marked.add(path[0])
 
 
         if ants.time_remaining() < 50:
             return
    
-        marked = set([])
         while len(L):
             path = L.popleft()
-            if path[0] not in marked:
-                marked.add(path[0])
-                sorted.append(path)
-                if path[0] in incoming:
-                    for p in incoming[path[0]]:
-                        if p != path:
-                            L.append(p)
- 
+            sorted.append(path)
+            if path[0] in incoming:
+                for p in incoming[path[0]]:
+                    if p[0] not in marked and  p != path:
+                        L.append(p)
+                        marked.add(p[0])
+
         if ants.time_remaining() < 50:
             return
    
@@ -387,17 +387,17 @@ class MyBot:
                 standing_ants.add(path[0])
 
         directions = ['n', 'w', 's', 'e']
-        marked = set([])
+        marked = set(ants.my_hills())
         openlist = deque(ants.my_hills())
         while len(openlist):
             loc = openlist.popleft()
-            marked.add(loc)
             cross = [loc]
             for dir in directions:
                 n_loc = ants.destination(loc, dir)
                 cross.append(n_loc)
                 if n_loc in self.reachable and n_loc not in marked:
                     openlist.append(n_loc)
+                    marked.add(n_loc)
             ok = True
             for node in cross:
                 if node not in self.reachable or node in ants.my_hills() or node in standing_ants:
