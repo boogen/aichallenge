@@ -4,57 +4,281 @@ from collections import deque
 from sets import Set
 import binaryheap
 import math
-import random
 
-# define a class with a do_turn method
-# the Ants.run method will parse and update bot input
-# it will also run the do_turn method for us
-class MyBot:
+KILL = 1
+SAFE = 2
+EQUAL = 3
+DIE = 4
+
+class roboboogie:
     def __init__(self):
-        # define class level variables, will be remembered between turns
         pass
+        
     
-    # do_setup is run once at the start of the game
-    # after the bot has received the game settings
-    # the ants class is created and setup by the Ants.run method
+
     def do_setup(self, ants):
-        self.hills = []
-        # initialize data structures after learning the game settings
-        self.seen = set([])
-        self.unseen = []
-        self.roles = {'peasants':set([]), 'guards':set([]), 'knights':set([])}
-        self.targets = set([])
-        self.ordered = set([])
-        self.paths = []
-        self.reachable = set(ants.my_hills())
-        self.weights = {}
+        self.agents = {'food':{}, 'explore':{}, 'hills':{}, 'enemy':{}}
 
-        self.border = []
-        self.crosses = []
-
-        self.enemy_hills = []
-        self.units = []
-
- 
+        self.directions = ('n', 'e', 's', 'w')
+        self.dirs = [(0, 1), (-1, 0), (0, -1), (1, 0)]
+        self.max_value = sys.maxint # ants.rows + ants.cols
+        self.open_list = []
+        self.last_seen = {}
         for row in range(ants.rows):
             for col in range(ants.cols):
-                self.unseen.append((row, col))        
+                self.open_list.append(0)
+                self.last_seen[(row, col)] = 0
+        self.open_list.append(0)
+        self.rows = ants.rows
+        self.cols = ants.cols
+
+        self.visible = {}
+
+        self.neighbours = {}
+        for row in range(ants.rows):
+            for col in range(ants.cols):
+                loc = (row, col)
+                nbrs = []
+                for dir in self.directions:
+                    n = ants.destination(loc, dir)
+                    nbrs.append(n)
+                self.neighbours[loc] = nbrs
+        self.paths = []
 
     
-    def __add_path__(self, path):
-        if len(self.roles['peasants']) < 50:
-            self.roles['peasants'].append(path)
+    def clear(self, ants):
+        for row in range(ants.rows):
+            for col in range(ants.cols):
+                n = (row, col)
+                self.visible[n] = ants.visible(n)
+                if self.visible[n]:
+                    self.last_seen[n] = self.max_value
+                elif self.last_seen[n] > 0:
+                    self.last_seen[n] -= 1
+                    
+                for goal in self.agents.keys():
+                    self.agents[goal][n] = 0
+        
+    def fast_bfs(self, ants, start_list, fun):
+        marked = set(start_list)
+
+        index = 0
+        i = 0
+        for loc in start_list:
+            self.open_list[i] = loc
+            i += 1
+        length = len(start_list)
+  
+        t = 0
+        
+        while index < length:
+            loc = self.open_list[index]
+            index += 1
+            fun(ants, loc)
+            for new_loc in self.neighbours[loc]:
+                if new_loc not in marked:
+                    self.open_list[length] = new_loc
+                    length += 1
+                    marked.add(new_loc)
+
+
+    def recalculate_scents(self, ants):
+        self.clear(ants)
+
+        self.enemy_hills = set([ hill_loc for hill_loc, owner in ants.hill_list.items() if owner != MY_ANT])
+        
+        self.fast_bfs(ants, self.enemy_hills, self.diffuse_hills)
+
+        self.enemy_ants = set([ant_loc for ant_loc, owner in ants.ant_list.items() if owner != MY_ANT])
+        self.fast_bfs(ants, self.enemy_ants, self.diffuse_ants)
+        unseen = []
+        for row in range(ants.rows):
+            for col in range(ants.cols):
+                loc = (row, col)
+                if not self.visible[loc]:
+                    for n in self.neighbours[loc]:
+                        if self.visible[n]:
+                            unseen.append(loc)
+                            break
+
+        self.fast_bfs(ants, unseen, self.diffuse_explore)
+            
+
+
+    def diffuse_hills(self, ants, loc):
+        if not ants.passable(loc):
+            self.agents['hills'][loc] = 0
+            return
+        if not self.visible[loc]:
+            self.agents['hills'][loc] = 0
+            return
+
+        if loc in self.enemy_hills:
+            self.agents['hills'][loc] = self.max_value
+        else:
+            self.diffuse(ants, loc, 'hills')
+
+    def diffuse_ants(self, ants, loc):
+        if not ants.passable(loc):
+            self.agents['enemy'][loc] = 0
+            return
+        if not self.visible[loc]:
+            self.agents['enemy'][loc] = 0
+            return
+        
+        if loc in self.enemy_ants:
+            self.agents['enemy'][loc] = self.max_value
+        else:
+            self.diffuse(ants, loc, 'enemy')
+
+    def diffuse_explore(self, ants, loc):
+        if not ants.passable(loc):
+            self.agents['explore'][loc] = 0
+            return
+
+        if not self.visible[loc]:
+            self.agents['explore'][loc] = self.max_value - self.last_seen[loc]
+        else:
+            self.diffuse(ants, loc, 'explore')
+
+    def diffuse_food(self, ants, loc):
+
+        if not ants.passable(loc):
+            self.agents['food'][loc] = 0
+            return
+        if loc in ants.my_ants():
+            self.agents['food'][loc] = 0
+            return
+        if not self.visible[loc]:
+            self.agents['food'][loc] = 0
+            return
+
+
+        if loc in ants.food():
+            self.agents['food'][loc] = self.max_value
+        else:
+            self.diffuse(ants, loc, 'food')
+
+
+
+    
+    def diffuse(self, ants, loc, goal):
+        value = 0
+        p = 0.5
+        for n in self.neighbours[loc]:
+            value += 0.25 * self.agents[goal][n]
+
+        self.agents[goal][loc] = value
+        
+    def find_goal(self, ants, ant_loc, goal):
+        max_value = 0
+        dest = ant_loc
+        for neighbour in self.neighbours[ant_loc]:
+            if self.agents[goal][neighbour] > max_value:
+                max_value = self.agents[goal][neighbour]
+                dest = neighbour
+        
+        if dest != ant_loc:
+            return [ant_loc, dest]
+        else:
+            return [ant_loc]
+
+    def make_move(self, ants, path):
+        if len(path) > 1:
+            if path[1] not in self.incoming:
+                self.incoming[path[1]] = []
+            self.incoming[path[1]].append(path)
+            self.outgoing[path[0]] = path[1]
+
+        
+    def topological_sort(self, ants):
+        L = deque([])
+        marked = set([])
+        for path in self.paths:
+            if path[0] in self.outgoing and self.outgoing[path[0]] not in self.outgoing:
+                L.append(path)
+                marked.add(path[0])
+
+        sorted = []
+
+        while len(L):
+            path = L.popleft()
+            sorted.append(path)
+            if path[0] in self.incoming:
+                for p in self.incoming[path[0]]:
+                    if p[0] not in marked and p != path:
+                        L.append(p)
+                        marked.add(p[0])
+
+        for ant_loc in self.standing:
+            can_kill, pos = self.try_to_kill(ants, ant_loc)
+            if can_kill:
+                self.orders.add(pos)
+                dir = ants.direction(ant_loc, pos)[0]
+                ants.issue_order((ant_loc, dir))
+            elif (self.tiles[ant_loc] == KILL or self.tiles[ant_loc] == SAFE) and ant_loc not in self.orders:
+                self.orders.add(ant_loc)
+            else:
+                for n in self.neighbours[ant_loc]:
+                    if ants.passable(n) and self.tiles[n] == SAFE and n not in self.orders:
+                        self.orders.add(n)
+                        dir = ants.direction(ant_loc, n)[0]
+                        ants.issue_order((ant_loc, dir))
+                        break
+
+            
+        for path in sorted:
+            if len(path) > 1:
+                
+                can_kill, pos = self.try_to_kill(ants, path[0])
+                if can_kill:
+                    self.orders.add(pos)
+                    dir = ants.direction(path[0], pos)[0]
+                    ants.issue_order((path[0], dir))
+                    path.pop(0)
+                elif self.tiles[path[0]] == KILL and path[0] not in self.orders:
+                    self.orders.add(path[0])                    
+                elif self.tiles[path[1]] == SAFE and path[1] not in self.orders:
+                    dir = ants.direction(path[0], path[1])[0]
+                    self.orders.add(path[1])
+                    ants.issue_order((path[0], dir))          
+                    path.pop(0)
+                elif self.tiles[path[0]] == SAFE and path[0] not in self.orders:
+                    self.orders.add(path[0])
+                else:
+                    for n in self.neighbours[path[0]]:
+                        if ants.passable(n) and self.tiles[n] == SAFE and n not in self.orders:
+                            self.orders.add(n)
+                            dir = ants.direction(path[0], n)[0]
+                            ants.issue_order((path[0], dir))
+                            path.pop(0)
+                            break
+
+                
+                    
+        
+    def try_to_kill(self, ants, ant_loc):
+        for n in self.neighbours[ant_loc]:
+            if ants.passable(n) and n not in self.orders and self.tiles[n] == KILL:
+                return (True, n)
+        for n in self.neighbours[ant_loc]:
+            if ants.passable(n) and n not in self.orders:
+                for hill_loc, owner in ants.hill_list.items():
+                    if ants.distance(ant_loc, hill_loc) < 10 and self.tiles[n] == EQUAL:
+                        return (True, n)
+                    elif ants.distance(ant_loc, hill_loc) <= 3 and self.tiles[n] == DIE:
+                        return (True, n)
+                        
+                    
+        return (False, (0, 0))
         
 
-    def do_move_location(self, ants, start, end, weight):
-        if ants.time_remaining() < 0.5 * ants.turntime:
-            return []
-
+    def find_path(self, ants, start, end):
         parents = {}
         costs = {}
         openlist = binaryheap.BinaryHeap(costs)
         closedlist = set([])
-        costs[start] = self.__cost__(start, end)
+        costs[start] = ants.distance(start, end)
         openlist.insert(start)
         directions = ('n', 'e', 's', 'w')
 
@@ -72,9 +296,8 @@ class MyBot:
                 if n == end:
                     success = True
                 else:
-                    for direction in directions:
-                        new_n = ants.destination(n, direction)   
-                        self.__addtoopenlist__(n, new_n, 1, end, parents, openlist, closedlist, costs, ants, weight)
+                    for new_n in self.neighbours[n]:
+                        self.__addtoopenlist__(n, new_n, 1, end, parents, openlist, closedlist, costs, ants)
 
             if (not n) or success:
                 complete = True
@@ -95,24 +318,20 @@ class MyBot:
                     
 
 
-    def __addtoopenlist__(self, nodefrom, nodeto, additionalcost, end, parents, openlist, closedlist, costs, ants, weight):
-
-        if nodeto not in self.reachable:
-            return       
-  
-        if self.weights[nodeto] < weight:
-            return
+    def __addtoopenlist__(self, nodefrom, nodeto, additionalcost, end, parents, openlist, closedlist, costs, ants):
 
         if (not ants.passable(nodeto)) or nodeto in closedlist:
+            return
+        if nodeto not in self.visible:
             return
 
   
         if not nodeto in costs:
-            costs[nodeto] = costs[nodefrom] - self.__cost__(nodefrom, end) + additionalcost + self.__cost__(nodeto, end)
+            costs[nodeto] = costs[nodefrom] - ants.distance(nodefrom, end) + additionalcost + ants.distance(nodeto, end)
             parents[nodeto] = nodefrom
             openlist.insert(nodeto)
-        elif costs[nodeto] - self.__cost__(nodeto, end) > costs[nodefrom] - self.__cost__(nodefrom, end) + additionalcost:
-            costs[nodeto] = costs[nodefrom] - self.__cost__(nodefrom, end) + additionalcost + self.__cost__(nodeto, end)
+        elif costs[nodeto] - ants.distance(nodeto, end) > costs[nodefrom] - ants.distance(nodefrom, end) + additionalcost:
+            costs[nodeto] = costs[nodefrom] - ants.distance(nodefrom, end) + additionalcost + ants.distance(nodeto, end)
             parents[nodeto] = nodefrom
             openlist.fix(nodeto)
         
@@ -120,564 +339,176 @@ class MyBot:
                 
         
     def __cost__(self, start, end):
-        dx = math.fabs(end[0] - start[0])
-        dy = math.fabs(end[1] - start[1])
-        return dx + dy
+        return ants.distance(start, end)
 
 
-    def do_move_direction(self, ants, loc, direction):
-        new_loc = ants.destination(loc, direction)
-        if (new_loc not in self.orders) and new_loc not in ants.food():
-            ants.issue_order((loc, direction))
-            self.orders[new_loc] = loc
-            self.ordered.add(loc)
-            return True
-        else:
-            self.orders[loc] = loc
+    def valid_path(self, ants, path):        
+        if len(path) <= 1:
             return False
-
-    def fix_role(self, path, loc):
-        for name, role in self.roles.iteritems():
-            if path[0] in role:                
-                self.new_roles[name].add(loc)
-                return
-
-
-
-
-                
-
-    def make_moves(self, ants):
-        self.new_roles = {'peasants':set([]), 'guards':set([]), 'knights':set([])}
-        mademoves = set([])
-
-        outgoing = {}
-        incoming = {}
-
-        L = deque([])
-        marked = set([])
-        sorted = []
-        cycles = []
-        standing = {}
-
-        for path in self.paths:
-            if len(path) < 2:
-                standing[path[0]] = path
-                self.orders[path[0]] = path[0]
-                self.move_ant(path, path[0], mademoves)
-
-        if ants.time_remaining() < 50:
-            return
-   
-        
-        for path in self.paths:
-            if len(path) > 1:
-                outgoing[path[0]] = path[1]
-                if path[1] not in incoming:
-                    incoming[path[1]] = []
-                incoming[path[1]].append(path)
-
-
-        if ants.time_remaining() < 50:
-            return
-   
-
-        fours = []
-        for path in self.paths:
-            if len(path) > 1:
-                p = path[0]
-                points = set([])
-                for i in range(0, 4):
-                    if p in outgoing:
-                        p = outgoing[p]
-                        points.add(p)
-                if p == path[0] and len(points) == 4:
-                    fours.append(path)
-                        
-
-        if ants.time_remaining() < 50:
-            return
-   
-        
-        for path in self.paths:
-            if len(path) > 1:
-                if path[1] in outgoing and outgoing[path[1]] == path[0]:                    
-                    i = 1
-                    length = 0
-                    while i < len(path) and path[i] in self.my_ants:
-                        length += 1
-                        i += 1
-                    cycles.append((length, path))
-    
-        if ants.time_remaining() < 50:
-            return
-   
-
-        cycles.sort()
-        cycles.reverse()
-
-        for path in self.paths:
-            if len(path) > 1:
-                if path[1] not in outgoing:
-                    L.append(path)
-                    marked.add(path[0])
-
-
-        if ants.time_remaining() < 50:
-            return
-   
-        while len(L):
-            path = L.popleft()
-            sorted.append(path)
-            if path[0] in incoming:
-                for p in incoming[path[0]]:
-                    if p[0] not in marked and  p != path:
-                        L.append(p)
-                        marked.add(p[0])
-
-        if ants.time_remaining() < 50:
-            return
-   
-
-            
-        for l, path in cycles:
-            if len(path) > 1 and path[0] not in mademoves:
-                self.uncycle(path, incoming, mademoves, ants)
-            else:
-                self.move_ant(path, path[0], mademoves)
-
-        if ants.time_remaining() < 50:
-            return
-   
-
-        for path in sorted:
-            dir = ants.direction(path[0], path[1])[0]
-            if self.do_move_direction(ants, path[0], dir):
-                self.move_ant(path, path[1], mademoves)
-            elif path[1] in standing:
-                for name, role in self.new_roles.iteritems():
-                    if path[1] in role:
-                        role.remove(path[1])
-
-                mademoves.remove(path[1])
-                self.move_ant(standing[path[1]], path[0], mademoves)
-                del standing[path[1]]                
-                self.orders[path[0]] = path[0]
-                self.move_ant(path, path[1], mademoves)
-            else:
-                self.move_ant(path, path[0], mademoves)
-                self.orders[path[0]] = path[0]
-
-        if ants.time_remaining() < 50:
-            return
-           
-
-        for path in fours:
-            self.move_ant(path, path[1], mademoves)
-
-        if ants.time_remaining() < 50:
-            return
-   
-
-        for path in self.paths:
-            if path[0] not in mademoves:
-                self.move_ant(path, path[0], mademoves)
-        self.roles = self.new_roles
-        return
-                
-    def uncycle(self, path, incoming, mademoves, ants):
-        if len(path) > 1:
-            p = path
-            marked = []
-            good_paths = [p]
-            while p[0] in incoming and len(good_paths) > 0:                         
-                good_paths = []
-                for some_path in incoming[p[0]]:
-                    if path[0] in some_path and some_path[0] in path and some_path != path:
-                        good_paths.append(some_path)
-                if len(good_paths) > 0:                                    
-                    p = good_paths[0]
-            if len(p) > 1 and p != path:
-                loc1 = path[0]
-                loc2 = p[0]
-                self.move_ant(path, loc2, mademoves)
-                self.move_ant(p, loc1, mademoves)     
-                return True
-        return False
-        
-    def switch_roles(self, loc1, loc2):
-        role1 = None
-        role2 = None
-        for name, role in self.roles.iteritems():
-            if loc1 in role:
-                role1 = role
-            if loc2 in role:
-                role2 = role
-
-        if role1 != role2:
-            role1.remove(loc1)
-            role1.add(loc2)
-            role2.remove(loc2)
-            role2.add(loc1)
-                            
-    def shift_move(self, path, loc):
-        path.insert(0, loc)
-
-    def move_ant(self, path, loc, mademoves):
-        if loc not in mademoves:
-            self.fix_role(path, loc)
-            if loc in path:
-                while path[0] != loc:
-                    path.pop(0)
-            else:
-                path.insert(0, loc)
-        else:
-            self.fix_role(path, path[0])            
-        mademoves.add(path[0])
-                                                                 
- 
-    def compute_border(self, ants):
-        if len(self.border) == 0:            
-            self.border = list(ants.my_hills())
-            self.reachable = set(ants.my_hills())
-            for hill_loc in ants.my_hills():
-                self.weights[hill_loc] = 3
-    
-
-        changed = True
-
-        i = 0
-        while changed:            
-            open_list = []
-            changed = False            
-            for loc in self.border:
-                not_seen_neighbour = False
-                for dir in ('n', 'e', 's', 'w'):
-                    n = ants.destination(loc, dir)
-                    if n not in self.seen:
-                        not_seen_neighbour = True
-                    elif n not in self.reachable:
-                        if ants.passable(n):
-                            changed = True
-                            self.reachable.add(n)
-                            open_list.append(n)
-                            if n not in self.weights:
-                                self.weights[n] = 3
-                        else:
-                            self.weights[n] = 0
-                            for d in ['n', 'e', 's', 'w']:
-                                self.weights[ants.destination(n, d)] = 1
-                                        
-                                
-                                
-                if not_seen_neighbour:
-                    open_list.append(loc)
-            if changed:
-                self.border = list(open_list)
-
-
-  
-
-            
-
-    def find_cross(self, ants, pos):
-        standing_ants = set([])
-        for path in self.paths:
-            if len(path) == 1:
-                standing_ants.add(path[0])
-
-        directions = ['n', 'w', 's', 'e']
-        marked = set(ants.my_hills())
-        openlist = deque(ants.my_hills())
-        while len(openlist):
-            loc = openlist.popleft()
-            cross = [loc]
-            for dir in directions:
-                n_loc = ants.destination(loc, dir)
-                cross.append(n_loc)
-                if n_loc in self.reachable and n_loc not in marked:
-                    openlist.append(n_loc)
-                    marked.add(n_loc)
-            ok = True
-            for node in cross:
-                if node not in self.reachable or node in ants.my_hills() or node in standing_ants:
-                    ok = False
-                    break
-            if ok:
-                return cross
-                 
-        return []        
-        
-            
-    def valid_path(self, ants, path):
-        if len(path) == 0:
+        elif not ants.passable(path[-1]):
             return False
         elif path[0] not in self.my_ants:
             return False
 
         return True
- 
-    def append_path(self, path):
-        for p in self.paths:
-            if p[0] == path[0]:
-                self.paths.remove(p)
-                break
-        self.paths.append(path)
 
-    def scatter(self, ants):
-       for unit in self.units:
-            scatter = True
-            for path in unit:
-                 if path[-1] in self.enemy_hills:
-                     scatter = False
+    def distance(self, loc1, loc2):
+        return math.sqrt((loc1[0] - loc2[0]) * (loc1[0] - loc2[0]) + (loc1[1] - loc2[1]) * (loc1[1] - loc2[1]))
 
-            if scatter:
-                for path in unit:
-                    if path[0] in self.roles['knights']:
-                        self.roles['knights'].remove(path[0])
-                        self.roles['peasants'].add(path[0])
-                        if path in self.paths:
-                            self.paths.remove(path)
-                self.units.remove(unit)
+    def calculate_influence(self, ants):
+        influence = {}
+        total = {}
+        for row in range(ants.rows):
+            for col in range(ants.cols):
+                loc = (row, col)
+                total[loc] = 0
                 
-    def fatality(self, ants):
-        for unit in self.units:
-            for path in unit:
-                if len(path) == 1:
-                    for dir in ('n', 'e', 's', 'w'):
-                        if ants.destination(path[0], dir) in self.enemy_hills:
-                            path.append(ants.destination(path[0], dir))
-                            return
 
-    # do turn is run once per turn
-    # the ants class has the game state and is updated by the Ants.run method
-    # it also has several helper methods to use
+        all_ants = list(ants.ant_list.items())
+        owners = set([])
+
+        for ant, owner in all_ants:
+            owners.add(owner)
+            if owner not in influence:
+                influence[owner] = {}
+                
+            possible_moves = list(self.neighbours[ant])
+            possible_moves.append(ant)
+            influenced = set([])
+            for ant_loc in possible_moves:
+                open_list = deque([ant_loc])
+                marked = set([ant_loc])
+                while len(open_list):
+                    loc = open_list.popleft()
+                    influenced.add(loc)
+                    for n in self.neighbours[loc]:
+                        if n not in marked and self.distance(ant_loc, n) <= ants.attackradius2 / 2.:
+                            marked.add(n)
+                            open_list.append(n)
+
+            for loc in influenced:
+                if loc not in influence[owner]:
+                    influence[owner][loc] = 0
+                influence[owner][loc] += 1
+                total[loc] += 1
+        self.enemies = {}
+        for owner in owners:
+            self.enemies[owner] = {}
+            for row in range(ants.rows):
+                for col in range(ants.cols):
+                    loc = (row, col)                    
+                    self.enemies[owner][loc] = total[loc]
+                    if owner in influence and loc in influence[owner]:
+                        self.enemies[owner][loc] -= influence[owner][loc]
+
+        self.fighting = {}
+        bazinga = set([])
+        for ant_loc in ants.my_ants():
+            bazinga.add(ant_loc)
+            for n in self.neighbours[ant_loc]:
+                bazinga.add(n)
+        for some_loc in bazinga:            
+            for foe_loc, owner in all_ants:
+                possible_moves = list(self.neighbours[foe_loc])
+                possible_moves.append(foe_loc)
+                max_enemies = 0
+                for enemy_loc in possible_moves:
+                    if owner != MY_ANT and self.distance(some_loc, enemy_loc) <= ants.attackradius2 / 2.:
+                        if self.enemies[owner][enemy_loc] > max_enemies:
+                            max_enemies = self.enemies[owner][enemy_loc]
+                if max_enemies > 0 and (some_loc not in self.fighting or max_enemies < self.fighting[some_loc]):
+                    self.fighting[some_loc] =  self.enemies[owner][enemy_loc]
+            if some_loc not in self.fighting:
+                self.fighting[some_loc] = 0
+
+        self.tiles = {}
+       
+        for loc in bazinga:
+            if self.enemies[MY_ANT][loc] < self.fighting[loc]:
+                if self.enemies[MY_ANT][loc] > 0:
+                    self.tiles[loc] = KILL
+                else:
+                    self.tiles[loc] = SAFE
+            elif self.enemies[MY_ANT][loc] == self.fighting[loc]:
+                if self.fighting[loc] == 0:
+                    self.tiles[loc] = SAFE
+                else:
+                    self.tiles[loc] = EQUAL
+            else:
+                self.tiles[loc] = DIE
+
     def do_turn(self, ants):
-        self.time = 0
-        self.my_ants = set(ants.my_ants())
-        
-        self.orders = {}
-        self.ordered = set([])        
+        self.recalculate_scents(ants)
+        self.calculate_influence(ants)
 
- 
-                    
+        self.my_ants = set(ants.my_ants())
+        self.orders = set([])
+        self.incoming = {}
+        self.outgoing = {}
 
         self.paths = [path for path in self.paths if self.valid_path(ants, path)]
-        for name, role in self.roles.iteritems():
-            dead_ants = set([])
-            for loc in role:
-                if loc not in self.my_ants:
-                    dead_ants.add(loc)
-            role -= dead_ants
-                    
-        if ants.time_remaining() < 50:
-            return
 
-        tar = set([])
+        targets = set([])
         busy_ants = set([])
-        waiting_ants = set([])
         for path in self.paths:
             if len(path) > 1:
-                tar.add(path[-1])
+                targets.add(path[-1])
                 busy_ants.add(path[0])
-            elif len(path) == 1:
-                waiting_ants.add(path[0])
-
-        if ants.time_remaining() < 50:
-            return
-
-        for loc in self.unseen[:]:
-            if ants.visible(loc):
-                self.seen.add(loc)
-                self.unseen.remove(loc)
-
-        if ants.time_remaining() < 50:
-            return
-
-        self.compute_border(ants)
-
-        if ants.time_remaining() < 50:
-            return
-
-
-        for hill, hill_owner in ants.enemy_hills():
-            if hill not in self.enemy_hills and hill in self.reachable:
-                self.enemy_hills.append(hill)
-        hills_copy = list(self.enemy_hills)
-        
-        if ants.time_remaining() < 50:
-            return
-
-
-        enmyhills = set([])
-        for hill, hill_owner in ants.enemy_hills():
-            enmyhills.add(hill)
-        for hill in hills_copy:
-            if ants.visible(hill) and  hill not in enmyhills:
-                self.enemy_hills.remove(hill)
-                
-        if ants.time_remaining() < 50:
-            return
-               
-                
-
-        self.scatter(ants)
-        if ants.time_remaining() < 50:
-            return
-
-        self.fatality(ants)
-        if ants.time_remaining() < 50:
-            return
-
-        
-        knights_gathering = 0
-        self.free_cross = []
-        if len(self.crosses) > 0:
-            self.free_cross = list(self.crosses[0])
-            for path in self.paths:
-                if path[0] in self.roles["knights"] and path[-1] in self.crosses[0]:
-                    if path[-1] in self.free_cross:
-                        self.free_cross.remove(path[-1])
-                        knights_gathering += 1
-
-        if ants.time_remaining() < 50:
-            return
- 
 
         for ant_loc in self.my_ants:
-            have_role = False
-            for name, role in self.roles.iteritems():
-                if ant_loc in role:
-                    have_role = True
-                    break
-
-            if not have_role:
-#                if (len(self.roles['peasants']) < 4 or len(self.roles['peasants']) < 0.5 * len(self.my_ants)):
-
-                if len(self.enemy_hills) == 0 or len(self.roles['peasants']) < 15 or knights_gathering == 5:                    
-                    self.roles['peasants'].add(ant_loc)                
-                else:
-                    self.roles['knights'].add(ant_loc)
-                    knights_gathering += 1                    
-                    if len(self.crosses) == 0:
-                        cross = self.find_cross(ants, ants.my_hills()[0])
-                        self.free_cross = list(cross)
-                        self.crosses.append(cross)
-
-        if ants.time_remaining() < 50:
-            return
-                    
-                    
-                        
-        for ant_loc in self.roles['knights']:
-            if ant_loc not in busy_ants and ant_loc not in waiting_ants and len(self.crosses):
-                cross = self.crosses[0]
-                loc = self.free_cross.pop(0)
-                path = self.do_move_location(ants, ant_loc, loc , 1)       
-                if ants.time_remaining() < 50:
-                    return
-         
-                if len(path) > 0:
-                    self.append_path(path)
-                    busy_ants.add(ant_loc)
-                    tar.add(loc)
-
-        if ants.time_remaining() < 50:
-            return
-                    
-        if len(self.crosses):
-            cross = self.crosses[0]
-            ready = True
-            for loc in cross:
-                if loc not in self.roles['knights']:
-                    ready = False
-
-            
-            if ready and len(self.enemy_hills):
-                loc = self.enemy_hills[0]
-                targets = [loc]
-                for dir in ('n', 'e', 's', 'w'):
-                    targets.append(ants.destination(loc, dir))
-                for target in targets:
-                    if target in self.weights and self.weights[target] == 3:
-                        loc = target
-                        break
-                path = self.do_move_location(ants, cross[0], loc, 3)
-                if ants.time_remaining() < 50:
-                    return
-
-                unit = []
-                if len(path) > 0:
-                    for dir in ['w', 'n', 'c', 's', 'e']:
-                        if dir == 'c':
-                            self.append_path(path)
-                            unit.append(path)
-                        else:
-                            new_path = []
-                            for n in path:
-                                new_path.append(ants.destination(n, dir))
-                            self.append_path(new_path)
-                            unit.append(new_path)
-                    self.units.append(unit)
-                    self.crosses.pop()
-
-            
-        if ants.time_remaining() < 50:
-            return
-               
-
-
-        for ant_loc in self.roles['peasants']:
             if ant_loc not in busy_ants:
                 foods = []
                 for food_loc in ants.food():
-                    if food_loc not in tar and food_loc in self.reachable:
+                    if food_loc not in targets:
                         dist = ants.distance(ant_loc, food_loc)
                         foods.append((dist, food_loc))
                 foods.sort()
-                if ants.time_remaining() < 50:
-                    return
-   
+
                 for dist, food_loc in foods:
-                    path = self.do_move_location(ants, ant_loc, food_loc, 1)
-                    if ants.time_remaining() < 50:
-                        return
-   
+                    path = self.find_path(ants, ant_loc, food_loc)
                     if len(path) > 0:
-                        self.append_path(path)
+                        self.paths.append(path)
                         busy_ants.add(ant_loc)
-                        tar.add(food_loc)
+                        targets.add(food_loc)
                         break
-        if ants.time_remaining() < 50:
-            return
-     
- 
-        random.shuffle(self.border)
 
-        if ants.time_remaining() < 50:
-            return
-   
-        for ant_loc in self.roles['peasants']:            
+        for ant_loc in self.my_ants:
             if ant_loc not in busy_ants:
-                for unseen_loc in self.border:
-                    if unseen_loc not in tar:
-                        path = self.do_move_location(ants, ant_loc, unseen_loc, 1)
-                        if ants.time_remaining() < 50:
-                            return
-   
-                        if len(path) > 0:
-                            self.append_path(path)
-                            busy_ants.add(ant_loc)
-                            tar.add(unseen_loc)
-                            break                
+                path = self.find_goal(ants, ant_loc, 'hills')
+                if len(path) > 1:
+                    self.paths.append(path)
+                else:
+                    path = self.find_goal(ants, ant_loc, 'enemy')
+                    if len(path) > 1:
+                        self.paths.append(path)
+                    else:
+                        path = self.find_goal(ants, ant_loc, 'explore')
+                        if len(path) > 1:
+                            self.paths.append(path)
 
-        if ants.time_remaining() < 50:
-            return
-   
-        self.make_moves(ants)
+        for path in self.paths:
+            self.make_move(ants, path)
 
+        assigned = set([])
+        for path in self.paths:
+            assigned.add(path[0])
+        self.standing = []
+        for ant_loc in self.my_ants:
+            if ant_loc not in assigned:
+                self.standing.append(ant_loc)
+                #self.paths.append([ant_loc, ant_loc])
+                #self.orders.add(ant_loc)
 
-    
+        for path in self.paths:
+            if len(path) > 1 and path[1] in self.outgoing and self.outgoing[path[1]] == path[0]:
+                for p in self.incoming[path[0]]:
+                    if path[1] == p[0]:
+                        path.pop(0)
+                        p.pop(0)
+                        break
+        self.topological_sort(ants)
+
+            
 if __name__ == '__main__':
     # psyco will speed up python a little, but is not needed
     try:
@@ -690,6 +521,6 @@ if __name__ == '__main__':
         # if run is passed a class with a do_turn method, it will do the work
         # this is not needed, in which case you will need to write your own
         # parsing function and your own game state class
-        Ants.run(MyBot())
+        Ants.run(roboboogie())
     except KeyboardInterrupt:
         print('ctrl-c, leaving ...')
